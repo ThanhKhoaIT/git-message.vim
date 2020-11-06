@@ -1,0 +1,7 @@
+*git-message.vim.txt* show Git message inline
+
+INTRODUCTION                                    *git-message.vim*
+
+A plugin to support interface for Vim, NeoVim and MacVim.
+
+Repo:    https://github.com/ThanhKhoaIT/git-message.vim

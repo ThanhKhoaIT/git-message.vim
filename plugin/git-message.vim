@@ -74,7 +74,7 @@ function! s:CacheCommitMessages()
 
   for commit in l:gitCommits
     let commitData = split(commit, '✄')
-    let g:gitCommitMessagesCached[commitData[0]] = commitData[1]
+    let g:gitCommitMessagesCached[commitData[0][0:5]] = commitData[1]
   endfor
 endfunction
 
@@ -94,9 +94,9 @@ function! s:CacheFileCommitIDs()
   for line in l:commitAllLines
     let l:commitID = split(line)[0]
     if l:commitID[0] == '^'
-      call add(g:commitIDsCached[l:filePath], l:commitID[1:9])
+      call add(g:commitIDsCached[l:filePath], l:commitID[1:6])
     else
-      call add(g:commitIDsCached[l:filePath], l:commitID[0:8])
+      call add(g:commitIDsCached[l:filePath], l:commitID[0:5])
     endif
   endfor
 endfunction
