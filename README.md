@@ -16,3 +16,5 @@ Example: (it is Default)
 ```vim
 let g:gmi_ignored_filetypes = ['help', 'qf', 'nerdtree', 'fzf']
 ```
+
+![Preview](https://i.ibb.co/swCs5b8/image.png)
