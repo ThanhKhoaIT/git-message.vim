@@ -10,11 +10,11 @@ Recommended installation with `vundle`:
 
 ### Configuration
 #### Ignore file-types to display git message
-Overwrite the `g:gmi_ignored_filetypes` variable
+Overwrite the `g:gmi#ignored_filetypes` variable
 
 Example: (it is Default)
 ```vim
-let g:gmi_ignored_filetypes = ['help', 'qf', 'nerdtree', 'fzf']
+let g:gmi#ignored_filetypes = ['help', 'qf', 'nerdtree', 'fzf']
 ```
 
 ![Preview](https://i.ibb.co/swCs5b8/image.png)

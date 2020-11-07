@@ -1,151 +1,138 @@
 " @Author:      Khoa Nguyen (thanhkhoa.it@gmail.com)
 " @Created:     2020-11-03
 
-autocmd   BufRead * call s:CacheCommitMessages()
-autocmd   BufRead,BufWritePost,CursorHold * call s:CacheFileCommitIDs()
+autocmd   VimEnter * call timer_start(500, function('s:GitLogLoading'))
+autocmd   BufRead,TabEnter * call s:InitPopup()
+autocmd   BufRead,BufWritePost,CursorHold * call s:LoadFileCommits()
 autocmd   CursorMoved * call s:ShowGitMessageInlinePopup()
 autocmd   CursorMovedI * call s:HideGitMessageInlinePopup()
-autocmd   TabEnter * call s:ReInitPopup()
 
-let g:gitCommitMessagesCached = {}
-let g:fileModifiedCached = {}
-let g:commitIDsCached = {}
-let g:ignoredFilesCached = {}
-let g:gitMessageInlinePopupID = popup_create('', #{
-      \ pos: 'topright',
-      \ highlight: 'CommitMessage',
-      \ hidden: 1
-      \ })
+let g:gmi#popup_id = 0
+let g:gmi#cached_git_logs = {}
+let g:gmi#modified_time_files = {}
+let g:gmi#commit_hash_files = {}
+let g:gmi#ignored_files = {}
 
 let s:ignored_filetypes = ['help', 'qf', 'nerdtree', 'fzf']
-if !exists('g:gmi_ignored_filetypes')
-  let g:gmi_ignored_filetypes = s:ignored_filetypes
-endif
+if !exists('g:gmi#ignored_filetypes') | let g:gmi#ignored_filetypes = s:ignored_filetypes | endif
 
 function! s:ShowGitMessageInlinePopup()
-  if index(g:gmi_ignored_filetypes, &filetype) >= 0 | return | endif
+  if index(g:gmi#ignored_filetypes, &filetype) >= 0 | return | endif
   if s:IgnoredFile() | return | endif
   if &modified | return | endif
-  if !g:gitMessageInlinePopupID | return | endif
+  if !g:gmi#popup_id | return | endif
 
-  let l:currentLineLength = strwidth(getline('.'))
-  let l:currentWindowWidth = winwidth(0)
-  let l:currentWindowLeft = win_screenpos(0)[1]
+  let l:line_length = strwidth(getline('.'))
+  let l:window_width = winwidth(0)
+  let l:window_left_position = win_screenpos(0)[1]
 
   let l:message = s:GetGitMessageInline()
+  if empty(l:message) | silent call s:HideGitMessageInlinePopup() | return | endif
 
-  if empty(l:message) | return | endif
+  if (l:window_width - l:line_length - len(l:message)) < 10
+    let l:message = split(l:message, ' ➤ ')
+  end
 
-  let l:toHide = (l:currentWindowWidth - l:currentLineLength - len(l:message)) < 10
-  if l:toHide | silent call popup_hide(g:gitMessageInlinePopupID) | return | endif
-
-  silent call popup_settext(g:gitMessageInlinePopupID, l:message)
-  silent call popup_move(g:gitMessageInlinePopupID, #{
+  silent call popup_settext(g:gmi#popup_id, l:message)
+  silent call popup_move(g:gmi#popup_id, #{
         \ line: 'cursor',
-        \ col: l:currentWindowWidth + l:currentWindowLeft - 2
+        \ col: l:window_width + l:window_left_position - 2
         \ })
 
-  if !s:PopupDisplayed() | silent call popup_show(g:gitMessageInlinePopupID) | endif
+  if !s:PopupDisplayed() | silent call popup_show(g:gmi#popup_id) | endif
 endfunction
 
 function! s:HideGitMessageInlinePopup()
-  call popup_hide(g:gitMessageInlinePopupID)
+  silent call popup_hide(g:gmi#popup_id)
 endfunction
 
-function! s:ReInitPopup()
-  call popup_close(g:gitMessageInlinePopupID)
-  let g:gitMessageInlinePopupID = popup_create('', #{
-      \ pos: 'topright',
+function! s:InitPopup()
+  silent call popup_close(g:gmi#popup_id)
+  let g:gmi#popup_id = popup_create('', #{
+      \ pos: 'botright',
       \ highlight: 'CommitMessage',
       \ hidden: 1
       \ })
 endfunction
 
 " Functions
-function! s:CacheCommitMessages()
-  if s:IgnoredFile() | return | endif
+function! s:GitLogLoading(timer_id)
+  silent let l:git_check_output = split(system('git status'))
+  if empty(l:git_check_output) | return | endif
+  if (l:git_check_output[0] == 'fatal:') | return | endif
 
-  let l:filePath = expand('%:p')
-  let l:gitCommand = "git log --format='%h✄%an ✧ %ar ➤ %s' " . l:filePath
+  let l:git_command = "git log --format='%h✄%an ✧ %ar ➤ %s'"
+  silent let l:commits = split(system(l:git_command), '\n')
 
-  silent let l:gitCommits = split(system(l:gitCommand), '\n')
-
-  if l:gitCommits[0][0:5] == 'fatal:' | return | endif
-
-  for commit in l:gitCommits
-    let commitData = split(commit, '✄')
-    let g:gitCommitMessagesCached[commitData[0][0:5]] = commitData[1]
+  for commit in l:commits
+    let [hash, info] = split(commit, '✄')
+    let g:gmi#cached_git_logs[hash[1:6]] = info
   endfor
 endfunction
 
-function! s:CacheFileCommitIDs()
-  let l:filePath = expand('%:p')
+function! s:LoadFileCommits()
   if s:IgnoredFile() | return | endif
 
-  if (has_key(g:fileModifiedCached, l:filePath) && (getftime(l:filePath) == g:fileModifiedCached[l:filePath])) | return | endif
+  let l:file_path = expand('%:p')
 
-  let g:fileModifiedCached[l:filePath] = getftime(l:filePath)
+  if (has_key(g:gmi#modified_time_files, l:file_path) && (getftime(l:file_path) == g:gmi#modified_time_files[l:file_path])) | return | endif
 
-  let l:gitCommand = "git blame --abbrev=9 " . l:filePath
-  silent let l:commitAllLines = split(system(l:gitCommand), '\n')
+  let g:gmi#modified_time_files[l:file_path] = getftime(l:file_path)
 
-  let g:commitIDsCached[l:filePath] = []
+  let l:git_command = 'git blame --abbrev=9 ' . l:file_path
+  silent let l:lines = split(system(l:git_command), '\n')
 
-  for line in l:commitAllLines
-    let l:commitID = split(line)[0]
-    if l:commitID[0] == '^'
-      call add(g:commitIDsCached[l:filePath], l:commitID[1:6])
-    else
-      call add(g:commitIDsCached[l:filePath], l:commitID[0:5])
-    endif
+  let g:gmi#commit_hash_files[l:file_path] = []
+  for line in l:lines
+    silent call add(g:gmi#commit_hash_files[l:file_path], split(line)[0][1:6])
   endfor
 endfunction
 
 function! s:GetGitMessageInline()
   if s:IgnoredFile() | return | endif
 
-  let l:filePath = expand('%:p')
-  let l:lineNr = line('.') - 1
+  let l:file_path = expand('%:p')
+  let l:line_number = line('.') - 1
 
-  if !has_key(g:commitIDsCached, l:filePath) | return | endif
-  if len(g:commitIDsCached[l:filePath]) < l:lineNr | return | endif
+  if !has_key(g:gmi#commit_hash_files, l:file_path) | return | endif
+  if len(g:gmi#commit_hash_files[l:file_path]) < l:line_number | return | endif
 
-  let l:commitID = g:commitIDsCached[l:filePath][l:lineNr]
+  let l:commit_id = g:gmi#commit_hash_files[l:file_path][l:line_number]
 
-  if l:commitID == '000000000' | return 'Not Committed Yet' | endif
-  if !has_key(g:gitCommitMessagesCached, l:commitID) | return '' | endif
+  if l:commit_id == '000000000' | return 'Not Committed Yet' | endif
+  if !has_key(g:gmi#cached_git_logs, l:commit_id) | return '' | endif
 
-  return g:gitCommitMessagesCached[l:commitID]
+  return g:gmi#cached_git_logs[l:commit_id]
 endfunction
 
 function! s:IgnoredFile()
-  let l:filePath = expand('%:p')
+  let l:file_path = expand('%:p')
 
-  if has_key(g:ignoredFilesCached, l:filePath) | return g:ignoredFilesCached[l:filePath] | endif
+  if has_key(g:gmi#ignored_files, l:file_path) | return g:gmi#ignored_files[l:file_path] | endif
 
-  let g:ignoredFilesCached[l:filePath] = 0
+  let g:gmi#ignored_files[l:file_path] = 0
 
-  if !filereadable(l:filePath)
-    let g:ignoredFilesCached[l:filePath] = 1
+  if !filereadable(l:file_path)
+    let g:gmi#ignored_files[l:file_path] = 1
     return 1
   endif
 
-  silent let l:gitCommandOutput = system("git ls-files " . l:filePath)
+  silent let l:git_command_output = system("git ls-files " . l:file_path)
 
-  if empty(l:gitCommandOutput)
-    let g:ignoredFilesCached[l:filePath] = 1
+  if empty(l:git_command_output)
+    let g:gmi#ignored_files[l:file_path] = 1
     return 1
   endif
 
-  if split(l:gitCommandOutput)[0] == 'fatal:'
-    let g:ignoredFilesCached[l:filePath] = 1
+  if split(l:git_command_output)[0] == 'fatal:'
+    let g:gmi#ignored_files[l:file_path] = 1
   endif
 
-  return g:ignoredFilesCached[l:filePath]
+  return g:gmi#ignored_files[l:file_path]
 endfunction
 
 function! s:PopupDisplayed()
-  return popup_getpos(g:gitMessageInlinePopupID).visible
+  return popup_getpos(g:gmi#popup_id).visible
 endfunction
 
 " Styles
