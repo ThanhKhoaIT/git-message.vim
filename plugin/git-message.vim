@@ -1,20 +1,30 @@
 " @Author:      Khoa Nguyen (thanhkhoa.it@gmail.com)
 " @Created:     2020-11-03
 
-autocmd   VimEnter * call timer_start(500, function('s:GitLogLoading'))
+autocmd   VimEnter * call s:LoadGitLog()
 autocmd   BufRead,TabEnter * call s:InitPopup()
 autocmd   BufRead,BufWritePost,CursorHold * call s:LoadFileCommits()
-autocmd   CursorMoved * call s:ShowGitMessageInlinePopup()
 autocmd   CursorMovedI * call s:HideGitMessageInlinePopup()
+autocmd   CursorMoved * call s:ShowGitMessageInlinePopup()
 
 let g:gmi#popup_id = 0
-let g:gmi#cached_git_logs = {}
+let g:gmi#cached_git_logs = { '000000': 'Not Committed Yet' }
 let g:gmi#modified_time_files = {}
 let g:gmi#commit_hash_files = {}
 let g:gmi#ignored_files = {}
 
 let s:ignored_filetypes = ['help', 'qf', 'nerdtree', 'fzf']
 if !exists('g:gmi#ignored_filetypes') | let g:gmi#ignored_filetypes = s:ignored_filetypes | endif
+
+" Functions
+function! s:InitPopup()
+  silent call popup_close(g:gmi#popup_id)
+  let g:gmi#popup_id = popup_create('', #{
+      \ pos: 'botright',
+      \ highlight: 'CommitMessage',
+      \ hidden: 1
+      \ })
+endfunction
 
 function! s:ShowGitMessageInlinePopup()
   if index(g:gmi#ignored_filetypes, &filetype) >= 0 | return | endif
@@ -31,6 +41,11 @@ function! s:ShowGitMessageInlinePopup()
 
   if (l:window_width - l:line_length - len(l:message)) < 10
     let l:message = split(l:message, ' ➤ ')
+
+    if (l:window_width - l:line_length - len(l:message[len(l:message) - 1])) < 10
+      call s:HideGitMessageInlinePopup()
+      return
+    endif
   end
 
   silent call popup_settext(g:gmi#popup_id, l:message)
@@ -46,28 +61,17 @@ function! s:HideGitMessageInlinePopup()
   silent call popup_hide(g:gmi#popup_id)
 endfunction
 
-function! s:InitPopup()
-  silent call popup_close(g:gmi#popup_id)
-  let g:gmi#popup_id = popup_create('', #{
-      \ pos: 'botright',
-      \ highlight: 'CommitMessage',
-      \ hidden: 1
-      \ })
-endfunction
-
-" Functions
-function! s:GitLogLoading(timer_id)
+function! s:LoadGitLog()
   silent let l:git_check_output = split(system('git status'))
   if empty(l:git_check_output) | return | endif
   if (l:git_check_output[0] == 'fatal:') | return | endif
 
-  let l:git_command = "git log --format='%h✄%an ✧ %ar ➤ %s'"
-  silent let l:commits = split(system(l:git_command), '\n')
+  silent call job_start(["git", "log", "--format=%h✄%an ✧ %ar ➤ %s"], { 'callback': 'AddGitLogToCache' })
+endfunction
 
-  for commit in l:commits
-    let [hash, info] = split(commit, '✄')
-    let g:gmi#cached_git_logs[hash[1:6]] = info
-  endfor
+function! AddGitLogToCache(_channel, commit)
+  let [hash, info] = split(a:commit, '✄')
+  let g:gmi#cached_git_logs[hash[1:6]] = info
 endfunction
 
 function! s:LoadFileCommits()
@@ -98,9 +102,7 @@ function! s:GetGitMessageInline()
   if len(g:gmi#commit_hash_files[l:file_path]) < l:line_number | return | endif
 
   let l:commit_id = g:gmi#commit_hash_files[l:file_path][l:line_number]
-
-  if l:commit_id == '000000000' | return 'Not Committed Yet' | endif
-  if !has_key(g:gmi#cached_git_logs, l:commit_id) | return '' | endif
+  if !has_key(g:gmi#cached_git_logs, l:commit_id) | return | endif
 
   return g:gmi#cached_git_logs[l:commit_id]
 endfunction
@@ -117,7 +119,7 @@ function! s:IgnoredFile()
     return 1
   endif
 
-  silent let l:git_command_output = system("git ls-files " . l:file_path)
+  silent let l:git_command_output = system('git ls-files ' . l:file_path)
 
   if empty(l:git_command_output)
     let g:gmi#ignored_files[l:file_path] = 1
