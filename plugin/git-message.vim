@@ -1,63 +1,99 @@
 " @Author:      Khoa Nguyen (thanhkhoa.it@gmail.com)
 " @Created:     2020-11-03
 
-autocmd   VimEnter * call s:LoadGitLog()
-autocmd   BufRead,TabEnter * call s:InitPopup()
-autocmd   BufRead,BufWritePost,CursorHold * call s:LoadFileCommits()
-autocmd   CursorMovedI * call s:HideGitMessageInlinePopup()
-autocmd   CursorMoved * call s:ShowGitMessageInlinePopup()
-
 let g:gmi#popup_id = 0
-let g:gmi#cached_git_logs = { '000000': 'Not Committed Yet' }
+let g:gmi#render_timer_id = 0
+let g:gmi#cached_git_logs = { '000000': 'You ➤ Not Committed Yet' }
 let g:gmi#modified_time_files = {}
 let g:gmi#commit_hash_files = {}
 let g:gmi#ignored_files = {}
+let g:gmi#current_line_cursor = ''
+let g:gmi#current_window_size = ''
 
-let s:ignored_filetypes = ['help', 'qf', 'nerdtree', 'fzf']
+let s:ignored_filetypes = ['help', 'qf', 'nerdtree', 'fzf', 'terminal']
+let s:prefix = '❥ '
+let s:delay_time = 50
+
 if !exists('g:gmi#ignored_filetypes') | let g:gmi#ignored_filetypes = s:ignored_filetypes | endif
+if !exists('g:gmi#prefix') | let g:gmi#prefix = s:prefix | endif
+if !exists('g:gmi#delay_time') | let g:gmi#delay_time = s:delay_time | endif
+
+if exists('*popup_create')
+  autocmd   VimEnter * call s:LoadGitLog()
+  autocmd   BufRead,TabEnter * call s:InitPopup()
+  autocmd   BufRead,BufWritePost,CursorHold * call s:LoadFileCommits()
+  autocmd   CursorMovedI * call s:HideGitMessageInlinePopup()
+  autocmd   CursorMoved,VimResized,BufWritePost,WinEnter,CmdlineEnter * call s:DelayToShowPopup()
+
+  call timer_start(g:gmi#delay_time * 4, 'GMIEventScanner', { 'repeat': -1 })
+else
+  echomsg 'Your vim not support popup'
+endif
 
 " Functions
 function! s:InitPopup()
+  if !exists('*popup_create') | return | endif
   silent call popup_close(g:gmi#popup_id)
   let g:gmi#popup_id = popup_create('', #{
-      \ pos: 'botright',
+      \ pos: 'botleft',
       \ highlight: 'CommitMessage',
-      \ hidden: 1
+      \ zindex: 1,
+      \ hidden: 1,
+      \ fixed: 1,
+      \ wrap: 0,
       \ })
 endfunction
 
-function! s:ShowGitMessageInlinePopup()
+function! s:DelayToShowPopup()
+  if !s:LineChanged() | return | endif
+
+  call s:HideGitMessageInlinePopup()
+  if !empty(timer_info(g:gmi#render_timer_id)) | call timer_stop(g:gmi#render_timer_id) | endif
+  let g:gmi#render_timer_id = timer_start(g:gmi#delay_time, 'GMICheckToShow')
+endfunction
+
+function! GMIEventScanner(_timer)
+  if g:gmi#current_window_size != s:WinSize() " WinSize changed
+    call GMICheckToShow(a:_timer)
+  else
+    let g:gmi#current_window_size = s:WinSize()
+  endif
+endfunction
+
+function! GMICheckToShow(_timer)
   if index(g:gmi#ignored_filetypes, &filetype) >= 0 | return | endif
   if s:IgnoredFile() | return | endif
   if &modified | return | endif
   if !g:gmi#popup_id | return | endif
 
+  call s:ShowGitMessageInlinePopup()
+endfunction
+
+function! s:ShowGitMessageInlinePopup()
+  let l:window_left_position = win_screenpos(0)[1]
   let l:line_length = strwidth(getline('.'))
   let l:window_width = winwidth(0)
-  let l:window_left_position = win_screenpos(0)[1]
+  let l:max_width_popup = l:window_width - l:line_length - 8
+
+  if l:max_width_popup <= 5 | call s:HideGitMessageInlinePopup() | return | endif
 
   let l:message = s:GetGitMessageInline()
-  if empty(l:message) | silent call s:HideGitMessageInlinePopup() | return | endif
+  if empty(l:message) | call s:HideGitMessageInlinePopup() | return | endif
 
-  if (l:window_width - l:line_length - len(l:message)) < 10
-    let l:message = split(l:message, ' ➤ ')
 
-    if (l:window_width - l:line_length - len(l:message[len(l:message) - 1])) < 10
-      call s:HideGitMessageInlinePopup()
-      return
-    endif
-  end
-
-  silent call popup_settext(g:gmi#popup_id, l:message)
+  silent call popup_settext(g:gmi#popup_id, g:gmi#prefix . l:message)
   silent call popup_move(g:gmi#popup_id, #{
         \ line: 'cursor',
-        \ col: l:window_width + l:window_left_position - 2
+        \ col: l:line_length + l:window_left_position + 8,
+        \ maxwidth: l:max_width_popup,
+        \ mask: [[-10, -1, -1, -1]],
         \ })
 
-  if !s:PopupDisplayed() | silent call popup_show(g:gmi#popup_id) | endif
+  if !s:PopupDisplayed() | call popup_show(g:gmi#popup_id) | endif
 endfunction
 
 function! s:HideGitMessageInlinePopup()
+  if &buftype == 'terminal' | return | endif
   silent call popup_hide(g:gmi#popup_id)
 endfunction
 
@@ -115,15 +151,13 @@ function! s:IgnoredFile()
   let g:gmi#ignored_files[l:file_path] = 0
 
   if !filereadable(l:file_path)
-    let g:gmi#ignored_files[l:file_path] = 1
-    return 1
+    let g:gmi#ignored_files[l:file_path] = 1 | return 1
   endif
 
   silent let l:git_command_output = system('git ls-files ' . l:file_path)
 
   if empty(l:git_command_output)
-    let g:gmi#ignored_files[l:file_path] = 1
-    return 1
+    let g:gmi#ignored_files[l:file_path] = 1 | return 1
   endif
 
   if split(l:git_command_output)[0] == 'fatal:'
@@ -135,6 +169,17 @@ endfunction
 
 function! s:PopupDisplayed()
   return popup_getpos(g:gmi#popup_id).visible
+endfunction
+
+function! s:LineChanged()
+  let l:current_line_cursor = @% . ':' . line('.')
+  let l:line_changed = g:gmi#current_line_cursor != l:current_line_cursor
+  let g:gmi#current_line_cursor = l:current_line_cursor
+  return l:line_changed
+endfunction
+
+function! s:WinSize()
+  return winwidth(0) . 'x' . winheight(0)
 endfunction
 
 " Styles
