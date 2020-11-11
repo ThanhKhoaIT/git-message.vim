@@ -1,6 +1,7 @@
 " @Author:      Khoa Nguyen (thanhkhoa.it@gmail.com)
 " @Created:     2020-11-03
 
+let g:gmi#loaded = 0
 let g:gmi#popup_id = 0
 let g:gmi#render_timer_id = 0
 let g:gmi#cached_git_logs = { '000000': 'You ➤ Not Committed Yet' }
@@ -12,7 +13,7 @@ let g:gmi#current_window_size = ''
 
 let s:ignored_filetypes = ['help', 'qf', 'nerdtree', 'fzf', 'terminal']
 let s:prefix = '❥ '
-let s:delay_time = 50
+let s:delay_time = 100
 
 if !exists('g:gmi#ignored_filetypes') | let g:gmi#ignored_filetypes = s:ignored_filetypes | endif
 if !exists('g:gmi#prefix') | let g:gmi#prefix = s:prefix | endif
@@ -25,6 +26,7 @@ if exists('*popup_create')
   autocmd   CursorMovedI * call s:HideGitMessageInlinePopup()
   autocmd   CursorMoved,VimResized,BufWritePost,WinEnter,CmdlineEnter * call s:DelayToShowPopup()
 
+  call timer_start(g:gmi#delay_time * 4, 'GMIReloading', { 'repeat': -1 })
   call timer_start(g:gmi#delay_time * 4, 'GMIEventScanner', { 'repeat': -1 })
 else
   echomsg 'Your vim not support popup'
@@ -33,7 +35,10 @@ endif
 " Functions
 function! s:InitPopup()
   if !exists('*popup_create') | return | endif
-  silent call popup_close(g:gmi#popup_id)
+  silent call popup_clear()
+
+  hi CommitMessage gui=NONE guibg=NONE guifg=#AAAAAA cterm=NONE ctermbg=NONE ctermfg=59
+
   let g:gmi#popup_id = popup_create('', #{
       \ pos: 'botleft',
       \ highlight: 'CommitMessage',
@@ -52,6 +57,10 @@ function! s:DelayToShowPopup()
   let g:gmi#render_timer_id = timer_start(g:gmi#delay_time, 'GMICheckToShow')
 endfunction
 
+function! GMIReloading(_timer)
+  if !g:gmi#loaded | call s:LoadGitLog() | endif
+endfunction
+
 function! GMIEventScanner(_timer)
   if g:gmi#current_window_size != s:WinSize() " WinSize changed
     call GMICheckToShow(a:_timer)
@@ -64,7 +73,7 @@ function! GMICheckToShow(_timer)
   if index(g:gmi#ignored_filetypes, &filetype) >= 0 | return | endif
   if s:IgnoredFile() | return | endif
   if &modified | return | endif
-  if !g:gmi#popup_id | return | endif
+  if !g:gmi#popup_id | call s:InitPopup() | endif
 
   call s:ShowGitMessageInlinePopup()
 endfunction
@@ -98,14 +107,20 @@ function! s:HideGitMessageInlinePopup()
 endfunction
 
 function! s:LoadGitLog()
+  if g:gmi#loaded | return | endif
+
   silent let l:git_check_output = split(system('git status'))
   if empty(l:git_check_output) | return | endif
   if (l:git_check_output[0] == 'fatal:') | return | endif
 
   silent call job_start(["git", "log", "--format=%h✄%an ✧ %ar ➤ %s"], { 'callback': 'AddGitLogToCache' })
+
+  let g:gmi#loaded = 1
 endfunction
 
 function! AddGitLogToCache(_channel, commit)
+  if a:commit[0:5] == 'fatal:' | return | endif
+
   let [hash, info] = split(a:commit, '✄')
   let g:gmi#cached_git_logs[hash[1:6]] = info
 endfunction
@@ -181,6 +196,3 @@ endfunction
 function! s:WinSize()
   return winwidth(0) . 'x' . winheight(0)
 endfunction
-
-" Styles
-hi CommitMessage gui=NONE guibg=NONE guifg=#AAAAAA cterm=NONE ctermbg=NONE ctermfg=59
