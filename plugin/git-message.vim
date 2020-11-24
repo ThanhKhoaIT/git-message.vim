@@ -50,6 +50,7 @@ function! s:InitPopup()
 endfunction
 
 function! s:DelayToShowPopup()
+  if &modified | call s:HideGitMessageInlinePopup() | endif
   if !s:LineChanged() | return | endif
 
   call s:HideGitMessageInlinePopup()
@@ -169,14 +170,14 @@ function! s:IgnoredFile()
     let g:gmi#ignored_files[l:file_path] = 1 | return 1
   endif
 
-  silent let l:git_command_output = system('git ls-files ' . l:file_path)
-
-  if empty(l:git_command_output)
-    let g:gmi#ignored_files[l:file_path] = 1 | return 1
-  endif
-
+  silent let l:git_command_output = system('git blame ' . l:file_path)
   if split(l:git_command_output)[0] == 'fatal:'
     let g:gmi#ignored_files[l:file_path] = 1
+  endif
+
+  silent let l:git_command_output = system('git ls-files ' . l:file_path)
+  if empty(l:git_command_output)
+    let g:gmi#ignored_files[l:file_path] = 1 | return 1
   endif
 
   return g:gmi#ignored_files[l:file_path]
