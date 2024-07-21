@@ -12,11 +12,15 @@ let g:gmi#current_line_cursor = ''
 let g:gmi#current_window_size = ''
 
 let s:ignored_filetypes = ['help', 'qf', 'nerdtree', 'fzf', 'terminal']
-let s:prefix = '❥ '
+let s:prefix = ' '
+let s:time_icon = ''
+let s:message_icon = ''
 let s:delay_time = 100
 
 if !exists('g:gmi#ignored_filetypes') | let g:gmi#ignored_filetypes = s:ignored_filetypes | endif
 if !exists('g:gmi#prefix') | let g:gmi#prefix = s:prefix | endif
+if !exists('g:gmi#time_icon') | let g:gmi#time_icon = s:time_icon | endif
+if !exists('g:gmi#message_icon') | let g:gmi#message_icon = s:message_icon | endif
 if !exists('g:gmi#delay_time') | let g:gmi#delay_time = s:delay_time | endif
 
 if exists('*popup_create')
@@ -73,6 +77,7 @@ endfunction
 function! GMICheckToShow(_timer)
   if index(g:gmi#ignored_filetypes, &filetype) >= 0 | return | endif
   if s:IgnoredFile() | return | endif
+  if s:EmptyLine() | return | endif
   if &modified | return | endif
   if !g:gmi#popup_id | call s:InitPopup() | endif
 
@@ -89,7 +94,6 @@ function! s:ShowGitMessageInlinePopup()
 
   let l:message = s:GetGitMessageInline()
   if empty(l:message) | call s:HideGitMessageInlinePopup() | return | endif
-
 
   silent call popup_settext(g:gmi#popup_id, g:gmi#prefix . l:message)
   silent call popup_move(g:gmi#popup_id, #{
@@ -114,7 +118,7 @@ function! s:LoadGitLog()
   if empty(l:git_check_output) | return | endif
   if (l:git_check_output[0] == 'fatal:') | return | endif
 
-  silent call job_start(["git", "log", "--format=%h✄%an ✧ %ar ➤ %s"], { 'callback': 'AddGitLogToCache' })
+  silent call job_start(["git", "log", "--format=%h✄%an " . g:gmi#time_icon . " %ar " . g:gmi#message_icon . " %s"], { 'callback': 'AddGitLogToCache' })
 
   let g:gmi#loaded = 1
 endfunction
@@ -171,6 +175,10 @@ function! s:IgnoredFile()
   endif
 
   silent let l:git_command_output = system('git blame ' . l:file_path)
+  if len(l:git_command_output) == 0
+    let g:gmi#ignored_files[l:file_path] = 1 | return 1
+  endif
+
   if split(l:git_command_output)[0] == 'fatal:'
     let g:gmi#ignored_files[l:file_path] = 1
   endif
@@ -181,6 +189,10 @@ function! s:IgnoredFile()
   endif
 
   return g:gmi#ignored_files[l:file_path]
+endfunction
+
+function! s:EmptyLine()
+  return len(getline('.')) == 0
 endfunction
 
 function! s:PopupDisplayed()
